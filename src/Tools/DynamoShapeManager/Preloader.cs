@@ -32,13 +32,17 @@ namespace DynamoShapeManager
         /// more than one ASM gets preloaded in the same address space.
         /// </summary>
         private static string preloadedShapeManagerPath = string.Empty;
+
+        private string rootFolder;
+        private List<Version> versionList;
+
         [Obsolete("Please use the Version2 Property instead.")]
         public LibraryVersion Version { get { return (LibraryVersion)Version2.Major; } }
-        public Version Version2 { get; }
+        public Version Version2 { get; private set; }
 
         public string ShapeManagerPath { get; set; }
-        public string PreloaderLocation { get; }
-        public string GeometryFactoryPath { get; }
+        public string PreloaderLocation { get; private set; }
+        public string GeometryFactoryPath { get; private set; }
 
         #endregion
 
@@ -130,14 +134,8 @@ namespace DynamoShapeManager
             if ((versions == null) || !versions.Any())
                 throw new ArgumentNullException("versions");
 
-            var versionList = versions.ToList();
-
-            var shapeManagerPath = string.Empty; // Folder that contains ASM binaries.
-            Version2 = Utilities.GetInstalledAsmVersion2(versionList, ref shapeManagerPath, rootFolder);
-            ShapeManagerPath = shapeManagerPath;
-            PreloaderLocation = Utilities.GetLibGPreloaderLocation(Version2, rootFolder);
-            GeometryFactoryPath = Path.Combine(PreloaderLocation,
-                Utilities.GeometryFactoryAssembly);
+            this.rootFolder = rootFolder;
+            versionList = versions.ToList();
         }
 
         /// <summary>
@@ -193,14 +191,10 @@ namespace DynamoShapeManager
             : this(rootFolder, new[] { version }) { }
 
         /// <summary>
-        /// Attempts to load the geometry library binaries using the version and location
-        /// specified when the Preloader was constructed.
+        /// Attempts to load the geometry library binaries.
         /// </summary>
         public void Preload()
         {
-            if (Version2 == null)
-                return;
-
             if (!string.IsNullOrEmpty(preloadedShapeManagerPath))
             {
                 // A previous preloading was done. If this call is targeting 
@@ -223,8 +217,36 @@ namespace DynamoShapeManager
                 return;
             }
 
+            // We don't have a path yet. Let's look for one.
+            if (ShapeManagerPath == null)
+            {
+                // Get all locations where ASM is installed on this machine.
+                var asmInstallations = Utilities.GetInstalledAsmVersions(versionList, rootFolder);
+                //asmInstallations.RemoveAt(0); // DEBUGGGGGGGG
+                string preloaderLocation;
+                foreach (var asmInstallation in asmInstallations)
+                {
+                    try
+                    {
+                        preloaderLocation = Utilities.GetLibGPreloaderLocation(asmInstallation.Version, rootFolder);
+                        Utilities.PreloadAsmFromPath(preloaderLocation, asmInstallation.Location);
+                    }
+                    catch
+                    {
+                        // Failed to preload ASM from this path. Continue with the next one.
+                        continue;
+                    }
+
+                    // Loading ASM from this path was successful. Assign properties and break out of the loop.
+                    Version2 = asmInstallation.Version;
+                    ShapeManagerPath = asmInstallation.Location;
+                    PreloaderLocation = preloaderLocation;
+                    GeometryFactoryPath = Path.Combine(preloaderLocation, Utilities.GeometryFactoryAssembly);
+                    break;
+                }
+            }
+
             preloadedShapeManagerPath = ShapeManagerPath;
-            Utilities.PreloadAsmFromPath(PreloaderLocation, ShapeManagerPath);
         }
 
         #endregion

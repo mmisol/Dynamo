@@ -204,6 +204,97 @@ namespace DynamoShapeManager
         }
 
         /// <summary>
+        /// Call this method to determine the versions of ASM that are installed on the user machine.
+        /// The method scans through a list of known Autodesk product folders for ASM binaries with the targeted versions.
+        /// </summary>
+        /// <param name="versions">A IEnumerable of version numbers to check for in order 
+        /// of preference. This argument cannot be null or empty.</param>
+        /// <param name="rootFolder">This method makes use of DynamoInstallDetective
+        /// to determine the installation location of various Autodesk products. This 
+        /// argument is not optional and must represent the full path to the folder 
+        /// which contains DynamoInstallDetective.dll. An exception is thrown if the 
+        /// assembly cannot be located.</param>
+        /// <param name="getASMInstallsFunc"> A delegate which can be used to replace the default ASM install
+        /// lookup method. This is primarily used for testing. The delegate should return an IEnumerable
+        /// of Tuples - these represent versions of ASM which are located on the user's machine.</param>
+        /// <returns>Returns the list of locations and System.Version of ASM installations found, or null in case of error.</returns>
+        /// 
+        internal static List<AsmInstallation> GetInstalledAsmVersions(IEnumerable<Version> versions, string rootFolder, Func<string, IEnumerable> getASMInstallsFunc = null)
+        {
+            if (string.IsNullOrEmpty(rootFolder))
+                throw new ArgumentNullException("rootFolder");
+            if (!Directory.Exists(rootFolder))
+                throw new DirectoryNotFoundException(rootFolder);
+            if ((versions == null) || versions.Count() <= 0)
+                throw new ArgumentNullException("versions");
+
+            var location = string.Empty;
+            var result = new List<AsmInstallation>();
+
+            try
+            {
+                // use the passed lookup function if it exists,
+                // else use the default asm install lookup -
+                // this is used for testing
+                getASMInstallsFunc = getASMInstallsFunc ?? GetAsmInstallations;
+                var installations = getASMInstallsFunc(rootFolder);
+
+                // first find the exact match or the lowest matching within same major version
+                foreach (var version in versions)
+                {
+                    Dictionary<Version, string> versionToLocationDic = new Dictionary<Version, string>();
+                    foreach (KeyValuePair<string, Tuple<int, int, int, int>> install in installations)
+                    {
+                        var installVersion = new Version(install.Value.Item1, install.Value.Item2, install.Value.Item3);
+                        if (version.Major == installVersion.Major && !versionToLocationDic.ContainsKey(installVersion))
+                        {
+                            versionToLocationDic.Add(installVersion, install.Key);
+                        }
+                    }
+
+                    // When there is major version matching, continue the search
+                    if (versionToLocationDic.Count != 0)
+                    {
+                        versionToLocationDic.TryGetValue(version, out location);
+                        // If exact matching version found, return it
+                        if (location != null)
+                        {
+                            result.Add(new AsmInstallation(location, version));
+                        }
+                        // If no matching version, return the lowest within same major
+                        else
+                        {
+                            location = versionToLocationDic[versionToLocationDic.Keys.Min()];
+                            result.Add(new AsmInstallation(location, versionToLocationDic.Keys.Min()));
+                        }
+                    }
+                }
+
+                // Fallback mechanism, look inside libg folders if any of them contains ASM dlls.
+                foreach (var v in versions)
+                {
+                    var folderName = string.Format("libg_{0}_{1}_{2}", v.Major, v.Minor, v.Build);
+                    var dir = new DirectoryInfo(Path.Combine(rootFolder, folderName));
+                    if (!dir.Exists)
+                        continue;
+
+                    var files = dir.GetFiles(ASMFileMask);
+                    if (!files.Any())
+                        continue;
+
+                    location = dir.FullName;
+                    result.Add(new AsmInstallation(location, v));
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            return result;
+        }
+
+
+        /// <summary>
         /// Get the corresponding libG preloader location for the target ASM loading version.
         /// If there is exact match preloader version to the target ASM version, use it, 
         /// otherwise use the closest below.
