@@ -385,11 +385,13 @@ namespace DynamoShapeManager
                 throw new ArgumentException($"Invalid ASM location { asmLocation }");
             }
             var preloaderPath = Path.Combine(preloaderLocationToLoad, PreloaderAssembly);
+            //var unmanagedDependencyPath = Path.Combine(preloaderLocationToLoad, "LibG.AsmPreloader.Unmanaged.dll");
 
             Debug.WriteLine(string.Format("LibG ASM Preloader location: {0}", preloaderPath));
             Debug.WriteLine(string.Format("ASM loading location: {0}", asmLocation));
 
-            var libG = Assembly.LoadFrom(preloaderPath);
+            var libG = Assembly.LoadFile(preloaderPath);
+            //var unmanagedDependency = Assembly.LoadFile(unmanagedDependencyPath);
             var preloadType = libG.GetType(PreloaderClassName);
 
             var preloadMethod = preloadType.GetMethod(PreloaderMethodName,
